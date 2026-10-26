@@ -71,8 +71,8 @@ instead of blanking the segment. Errors are logged once per distinct message as 
 log (Settings › Advanced › Open logs).
 
 The dashboard is a `cx.canvas` pane, so it needs no host half and survives reloads. Every window
-samples on its own; one window at a time (a lease in `tern.kv`, renewed every 5 s) pushes the
-dashboard updates, and another takes over 15 s after that window closes.
+samples on its own and updates the dashboard when its session shows one; a window on another session
+leaves it alone.
 
 ## Development
 

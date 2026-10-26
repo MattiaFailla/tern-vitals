@@ -20,11 +20,6 @@ local TIMEOUT_MS = 8000
 
 local ACTION = "plugin.vitals.open"
 local DASH_TITLE = "System Vitals"
--- Which window keeps the dashboard updated: one lease in tern.kv, renewed
--- every LEASE_RENEW_S by its holder and taken over once LEASE_TTL_S passes.
-local LEASE_KEY = "dashboard_lease"
-local LEASE_RENEW_S = 5
-local LEASE_TTL_S = 15
 
 local MAC_SCRIPT = table.concat({
 	"echo @vm; /usr/bin/vm_stat",
@@ -54,7 +49,6 @@ local segments: { StatusSegment }? = nil
 local latest: metrics.Sample = {}
 local history: { cpu: { number }, mem: { number } } = { cpu = {}, mem = {} }
 local last_error: string? = nil
-local vm_id = string.format("%x-%x", math.floor(os.clock() * 1e6), math.random(1, 0x7fffffff))
 
 local function push(buf: { number }, v: number)
 	table.insert(buf, v)
@@ -281,25 +275,11 @@ local function find_dashboard(cx: WindowCx): number?
 	return nil
 end
 
--- Whether this window should push updates to the dashboard, renewing or
--- taking the lease as needed. kv is shared by every window's window half.
-local function hold_lease(): boolean
-	local now = os.time()
-	local lease = tern.kv.get(LEASE_KEY)
-	local mine = type(lease) == "table" and lease.vm == vm_id
-	local fresh = type(lease) == "table" and type(lease.t) == "number" and now - lease.t < LEASE_TTL_S
-	if fresh and not mine then
-		return false
-	end
-	if not mine or now - lease.t >= LEASE_RENEW_S then
-		tern.kv.set(LEASE_KEY, { vm = vm_id, t = now })
-	end
-	return true
-end
-
+-- Every window showing the dashboard updates it from its own samples; one
+-- that doesn't show it (another session) skips it.
 local function update_dashboard(cx: WindowCx)
 	local pane = find_dashboard(cx)
-	if pane ~= nil and hold_lease() then
+	if pane ~= nil then
 		cx.canvas:set(pane, { view = dashboard_view() })
 	end
 end
@@ -322,7 +302,6 @@ local function open_dashboard(cx: WindowCx)
 		cx:toast("error", "System Vitals not opened", err)
 		return
 	end
-	tern.kv.set(LEASE_KEY, { vm = vm_id, t = os.time() })
 end
 
 -- Poll loop ------------------------------------------------------------------
