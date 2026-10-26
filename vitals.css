@@ -1,0 +1,31 @@
+/* Status line segments: tabular digits and preserved padding so the
+   width doesn't jitter as values change. */
+#statusline .sl-plugin[data-plugin='vitals'] {
+	font-family: var(--mono, ui-monospace, monospace);
+	font-variant-numeric: tabular-nums;
+	white-space: pre;
+	color: var(--t3);
+}
+
+#statusline .sl-plugin[data-plugin='vitals'][data-tone='warn'] {
+	color: var(--warn);
+}
+
+#statusline .sl-plugin[data-plugin='vitals'][data-tone='error'] {
+	color: var(--bad);
+}
+
+#statusline .sl-plugin[data-plugin='vitals'][data-tone='ok'] {
+	color: var(--ok);
+}
+
+/* Dashboard: the chart rebuilds on every sample, so skip its grow-in
+   animation instead of replaying it every two seconds. */
+[data-role='vitals.spark'] .b {
+	animation: none;
+}
+
+[data-role='vitals.dashboard'] .sf-mt-lbl,
+[data-role='vitals.dashboard'] .sf-mt-total {
+	font-variant-numeric: tabular-nums;
+}

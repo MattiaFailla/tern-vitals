@@ -1,0 +1,8 @@
+schema = 1
+id = "vitals"
+name = "Vitals"
+version = "0.1.0"
+description = "iTerm-style CPU, memory, disk and battery in the status line, with a live dashboard."
+icon = "activity"
+window = "window.luau"
+styles = ["vitals.css"]
