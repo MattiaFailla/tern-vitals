@@ -133,32 +133,73 @@ end
 
 local ui = tern.ui
 
-local function spark(values: { number }, token: string): Node
+-- A 2-line bar chart of the history, padded on the left to HISTORY bars so
+-- the bars keep their width while the history fills up.
+local function history_chart(values: { number }, token: string): Node
 	local series: { { value: number, title: string? } } = {}
-	for i, v in values do
-		series[i] = { value = math.max(v, 0.5), title = metrics.pct(v) }
+	for _ = #values + 1, HISTORY do
+		table.insert(series, { value = 0 })
 	end
-	-- Pad to a fixed width so bars don't resize while the history fills up.
-	for i = #series + 1, HISTORY do
-		table.insert(series, 1, { value = 0 })
+	for _, v in values do
+		-- Heights are relative to the largest bar; a 100% bar pins the scale.
+		table.insert(series, { value = math.max(v, 0.5), title = metrics.pct(v) })
 	end
-	return ui.node("chart", { kind = "spark", token = token, series = series, role = "vitals.spark", grow = 1 })
+	table.insert(series, 1, { value = 100, title = "scale" })
+	return ui.node("chart", { kind = "bars", size = "sm", token = token, series = series, role = "vitals.chart" })
 end
 
-local function meter(value: number, label: string, total: string?, parts: { any }?): Node
+-- The card ring follows the same bands as the status segments.
+local function level_tone(pct: number): string?
+	local t = metrics.tone(pct)
+	return if t == "error" then "error" elseif t == "warn" then "warning" else nil
+end
+
+-- A headless card (even padding, no 36px head indent) whose first line is
+-- the metric's name on the left and its value on the right.
+local function metric_card(key: string, name: string, value: string, tone: string?, body: { Node }): Node
+	local children: { Node } = {
+		ui.node("row", { justify = "between", align = "baseline", role = "vitals.head" }, {
+			ui.text({ ui.span(name, "strong") }),
+			ui.text({ ui.span(value, "strong") }),
+		}),
+	}
+	for _, n in body do
+		table.insert(children, n)
+	end
+	return ui.node("card", {
+		key = key,
+		tone = tone,
+		basis = 0.45,
+		grow = 1,
+		min = { w = "34ch" },
+		role = "vitals.card",
+	}, { ui.node("col", { gap = "md" }, children) })
+end
+
+local function meter(value: number, tone: string?, parts: { any }?): Node
 	return ui.node("meter", {
 		value = value / 100,
 		parts = parts,
 		thresholds = { warn = 0.75, bad = 0.9 },
+		tone = tone,
 		size = "md",
-		label = label,
-		total = total,
 		role = "vitals.meter",
 	})
 end
 
-local function muted(text: string): Node
-	return ui.text({ ui.span(text, "muted") })
+-- A muted detail line; pairs of {text, token} draw a colored square first.
+local function detail(items: { { string } }): Node
+	local spans: { Span | string } = {}
+	for i, item in items do
+		if i > 1 then
+			table.insert(spans, ui.span("   ", "muted"))
+		end
+		if item[2] ~= nil then
+			table.insert(spans, ui.span("■ ", item[2]))
+		end
+		table.insert(spans, ui.span(item[1], "muted"))
+	end
+	return ui.text(spans)
 end
 
 local function dashboard_view(): Node
@@ -166,63 +207,68 @@ local function dashboard_view(): Node
 	local cards: { Node } = {}
 	local cpu = s.cpu
 	if cpu then
-		local detail = string.format("user %s · sys %s", metrics.pct(cpu.user), metrics.pct(cpu.sys))
+		local lines: { Node } = {
+			meter(cpu.busy),
+			history_chart(history.cpu, "accent"),
+			detail({ { "user " .. metrics.pct(cpu.user) }, { "sys " .. metrics.pct(cpu.sys) } }),
+		}
 		if cpu.load then
-			detail ..= string.format(" · load %.2f %.2f %.2f", cpu.load[1], cpu.load[2], cpu.load[3])
+			table.insert(lines, detail({ { string.format("load %.2f  %.2f  %.2f", cpu.load[1], cpu.load[2], cpu.load[3]) } }))
 		end
-		table.insert(cards, ui.card("CPU", {
-			meter(cpu.busy, metrics.pct(cpu.busy)),
-			spark(history.cpu, "accent"),
-			muted(detail),
-		}))
+		table.insert(cards, metric_card("cpu", "CPU", metrics.pct(cpu.busy), level_tone(cpu.busy), lines))
 	end
 	local mem = s.mem
 	if mem then
 		local p = mem_pct(mem)
 		local parts = {
-			{ value = mem.app / mem.total, token = "info", label = "app " .. metrics.bytes(mem.app) },
-			{ value = mem.wired / mem.total, token = "warning", label = "wired " .. metrics.bytes(mem.wired) },
-			{ value = mem.compressed / mem.total, token = "muted", label = "compressed " .. metrics.bytes(mem.compressed), hatch = true },
+			{ value = mem.app / mem.total, token = "info", label = "app" },
+			{ value = mem.wired / mem.total, token = "warning", label = "wired" },
+			{ value = mem.compressed / mem.total, token = "muted", label = "compressed", hatch = true },
 		}
-		local detail = string.format("app %s · wired %s", metrics.bytes(mem.app), metrics.bytes(mem.wired))
+		local legend = { { "app " .. metrics.bytes(mem.app), "info" }, { "wired " .. metrics.bytes(mem.wired), "warning" } }
 		if mem.compressed > 0 then
-			detail ..= " · compressed " .. metrics.bytes(mem.compressed)
+			table.insert(legend, { "compressed " .. metrics.bytes(mem.compressed), "muted" })
 		end
-		table.insert(cards, ui.card("Memory", {
-			meter(p, metrics.pct(p), metrics.bytes(mem.used) .. " / " .. metrics.bytes(mem.total), parts),
-			spark(history.mem, "info"),
-			muted(detail),
+		table.insert(cards, metric_card("mem", "Memory", metrics.pct(p), level_tone(p), {
+			meter(p, nil, parts),
+			history_chart(history.mem, "info"),
+			detail(legend),
+			detail({ { metrics.bytes(mem.used) .. " of " .. metrics.bytes(mem.total) .. " used" } }),
 		}))
 	end
 	local disk = s.disk
 	if disk then
-		local p = disk.pct
-		table.insert(cards, ui.card("Disk", {
-			meter(p, metrics.pct(p), metrics.bytes(disk.used) .. " / " .. metrics.bytes(disk.size)),
-			muted(metrics.bytes(disk.free) .. " free"),
+		table.insert(cards, metric_card("disk", "Disk", metrics.pct(disk.pct), level_tone(disk.pct), {
+			meter(disk.pct),
+			detail({ { metrics.bytes(disk.used) .. " of " .. metrics.bytes(disk.size) .. " used" } }),
+			detail({ { metrics.bytes(disk.free) .. " free" } }),
 		}))
 	end
 	local b = s.battery
 	if b then
-		local detail = b.state
+		local state = if b.state == "ac" then "on power, not charging" else b.state
+		local items = { { state } }
 		if b.remaining then
-			detail ..= " · " .. b.remaining .. (if b.state == "charging" then " to full" else " left")
+			table.insert(items, { b.remaining .. (if b.state == "charging" then " to full" else " left") })
 		end
-		table.insert(cards, ui.card("Battery", {
+		local low = b.state == "discharging" and b.percent <= 20
+		table.insert(cards, metric_card("battery", "Battery", metrics.pct(b.percent), if low then "error" else nil, {
 			ui.node("meter", {
 				value = b.percent / 100,
 				size = "md",
-				label = metrics.pct(b.percent),
-				tone = if b.state == "discharging" and b.percent <= 20 then "error" else "success",
+				tone = if low then "error" else "success",
 				role = "vitals.meter",
 			}),
-			muted(detail),
+			detail(items),
 		}))
 	end
 	if #cards == 0 then
-		table.insert(cards, muted("Waiting for the first sample…"))
+		return ui.node("col", { key = "root", role = "vitals.dashboard" }, { detail({ { "Waiting for the first sample…" } }) })
 	end
-	return ui.node("col", { key = "root", role = "vitals.dashboard" }, cards)
+	return ui.node("col", { key = "root", gap = "lg", role = "vitals.dashboard" }, {
+		ui.node("row", { key = "grid", gap = "md", wrap = true, align = "stretch" }, cards),
+		detail({ { string.format("every %.0f s · updated %s", INTERVAL_MS / 1000, os.date("%H:%M:%S")) } }),
+	})
 end
 
 -- This plugin's dashboard canvas, if one exists anywhere this window can see.

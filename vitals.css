@@ -21,11 +21,23 @@
 
 /* Dashboard: the chart rebuilds on every sample, so skip its grow-in
    animation instead of replaying it every two seconds. */
-[data-role='vitals.spark'] .b {
+[data-role='vitals.chart'] .b {
 	animation: none;
 }
 
-[data-role='vitals.dashboard'] .sf-mt-lbl,
-[data-role='vitals.dashboard'] .sf-mt-total {
+/* The first bar is a hidden 100% bar that pins the chart to a 0-100 scale. */
+[data-role='vitals.chart'] .b:first-child {
+	visibility: hidden;
+}
+
+[data-role='vitals.dashboard'] {
+	padding: 4px 2px;
+}
+
+[data-role='vitals.head'] .sf-text {
 	font-variant-numeric: tabular-nums;
+}
+
+[data-role='vitals.head'] .sf-text:last-child {
+	font-size: 1.25em;
 }
